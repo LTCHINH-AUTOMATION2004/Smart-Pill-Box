@@ -473,8 +473,8 @@ input[placeholder*="ID"] {
         led.className = "status-led connecting";
         retryBtn.style.display = "none";
 
-        client = new Paho.MQTT.Client("broker.hivemq.com", 8000, "web_dash_" + parseInt(Math.random()*10000));
-        
+        //client = new Paho.MQTT.Client("broker.hivemq.com", 8000, "web_dash_" + parseInt(Math.random()*10000));
+        client = new Paho.MQTT.Client("broker.hivemq.com", 8884, "clientId-" + parseInt(Math.random() * 100));
         client.onConnectionLost = () => {
             led.className = "status-led disconnected";
             retryBtn.style.display = "block";
@@ -561,17 +561,20 @@ input[placeholder*="ID"] {
             }
         };
         client.connect({
-            onSuccess: () => {
-                led.className = "status-led connected";
-                client.subscribe("med/status");
-                client.subscribe("med/history");
-                showToast("Hộp thuốc trực tuyến!", "success");
-            },
-            onFailure: () => {
-                led.className = "status-led disconnected";
-                retryBtn.style.display = "block";
-            }
-        });
+        useSSL: true, // Bắt buộc cho GitHub Pages (HTTPS)
+        timeout: 10,
+        onSuccess: () => {
+            led.className = "status-led connected";
+            client.subscribe("med/status");
+            client.subscribe("med/history");
+            showToast("Hộp thuốc đã trực tuyến!", "success");
+        },
+        onFailure: (err) => {
+            led.className = "status-led disconnected";
+            showToast("Kết nối thất bại: " + err.errorMessage, "error");
+            if (typeof retryBtn !== 'undefined') retryBtn.style.display = "block";
+        }
+    });
     }
 
     // THÊM NHẬT KÝ HOẠT ĐỘNG MỚI VÀO HỘP ĐEN
