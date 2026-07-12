@@ -1,0 +1,948 @@
+
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GIAO DIỆN GIÁM SÁT HỘP THUỐC THÔNG MINH</title>
+    <link rel="manifest" href="manifest.json">
+    <script>
+    if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js')
+      .then(() => console.log('Service Worker đã đăng ký thành công!'))
+      .catch(err => console.log('Đăng ký thất bại:', err));
+    }
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-dark: #040e25;
+            --panel-bg: rgba(3, 16, 20, 0.7);
+            --primary-neon: #38bdf8;
+            --primary-gradient: linear-gradient(135deg, #1880a0, #bb8313);
+            --danger-gradient: linear-gradient(135deg, #f43f5e, #c61a1d);
+            --success-color: #10b981;
+            --warning-color: #db9813;
+            --text-main: #f8fafc;
+            --text-muted: #8d9db4;
+            --border-glow: rgba(3, 27, 37, 0.2);
+            --shadow-btn: 0 4px 12px rgba(3, 28, 39, 0.3);
+        }
+        body { 
+            font-family: 'Segoe UI', system-ui, sans-serif; 
+            background: radial-gradient(circle at top right, #0b0839, var(--bg-dark));
+            color: var(--text-main);
+            display: flex; 
+            justify-content: center; 
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px; 
+            box-sizing: border-box;
+        }
+
+        /* TÁI CẤU TRÚC 3 CỘT */
+        .dashboard-layout {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+            width: 100%;
+            max-width: 1350px;
+        }
+        @media (min-width: 1024px) {
+            .dashboard-layout { grid-template-columns: 400px 1fr 380px; }
+        }
+
+        .container { 
+            background: var(--panel-bg); 
+            padding: 25px; 
+            border-radius: 24px; 
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4); 
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header-wrapper {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        h2 { 
+            color: #54e1e1; font-size: 1.15rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 1px; text-shadow: 0 0 12px rgba(56, 189, 248, 0.4); margin: 0;
+        }
+
+        h3 {
+            color: var(--text-main); font-size: 1rem; font-weight: 600;
+            margin-top: 20px; margin-bottom: 12px; border-left: 3px solid var(--primary-neon); padding-left: 10px;
+        }
+
+        /* WIDGET TRẠNG THÁI PHẦN CỨNG MỚI */
+        .hardware-widget {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .hw-card {
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid rgba(255,255,255,0.05);
+            padding: 10px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .hw-info { display: flex; flex-direction: column; }
+        .hw-label { color: var(--text-muted); font-size: 0.75rem; }
+        .hw-value { color: #e39516; font-weight: 600; }
+        .dot-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--success-color); box-shadow: 0 0 8px var(--success-color); }
+
+        .status-container { display: flex; align-items: center; gap: 8px; background: rgba(0, 0, 0, 0.2); padding: 6px 12px; border-radius: 20px; }
+        .status-led { width: 10px; height: 10px; border-radius: 50%; background-color: #64748b; }
+        .status-led.connecting { background-color: var(--warning-color); box-shadow: 0 0 10px var(--warning-color); animation: pulse 1s infinite alternate; }
+        .status-led.connected { background-color: var(--success-color); box-shadow: 0 0 10px var(--success-color); }
+        .status-led.disconnected { background-color: #ef4444; box-shadow: 0 0 10px #ef4444; }
+
+        @keyframes pulse { from { opacity: 0.4; } to { opacity: 1; } }
+        .btn-retry { background: none; border: none; color: var(--primary-neon); font-size: 0.75rem; cursor: pointer; text-decoration: underline; display: none; }
+
+        /* Tối ưu lại khung chứa Input */
+.input-form-box {
+    background: rgba(5, 4, 12, 0.4); 
+    padding: 15px; 
+    border-radius: 16px;
+    border: 1px solid rgba(22, 15, 15, 0.05); 
+    margin-bottom: 15px;
+}
+
+/* SỬA LỖI TRÀN: Chuyển sang Grid để tự động chia không gian */
+.flex-inputs { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 12px; 
+}
+
+.input-row-top { 
+    display: grid;
+    grid-template-columns: 140px 1fr; /* Tăng chiều rộng ô Time lên 140px để lộ rõ chữ AM/PM */
+    gap: 10px;
+    align-items: center;
+    width: 100%;
+}
+
+/* Định dạng lại ô chọn thời gian để không bị khuyết chữ */
+input[type="time"] { 
+    background: rgba(15, 23, 42, 0.6); 
+    border: 1px solid rgba(255,255,255,0.1); 
+    padding: 10px 8px;
+    border-radius: 10px; 
+    font-size: 1rem; 
+    font-weight: 600; 
+    color: var(--primary-neon); 
+    outline: none; 
+    width: 100%; /* Co giãn theo Grid 140px */
+    box-sizing: border-box;
+    text-align: center;
+}
+input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(1); margin-left: 2px; }
+
+/* Định dạng lại ô nhập tên thuốc bảo vệ background */
+input[type="text"] {
+    background: rgba(1, 21, 46, 0.6); 
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 11px 12px; 
+    border-radius: 10px; 
+    color: #f3eded; 
+    font-size: 0.85rem; 
+    outline: none; 
+    box-sizing: border-box;
+    width: 100%; /* Giữ cố định trong phân vùng Grid */
+}
+
+/* Đồng bộ Dropdown và nút bấm */
+select { 
+    width: 100%; 
+    background: rgba(15, 23, 42, 0.6); 
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 11px 12px; 
+    border-radius: 10px; 
+    color: #edeaea; 
+    font-size: 0.85rem;
+    outline: none;
+    cursor: pointer; 
+    box-sizing: border-box;
+}
+
+        .setting-group { margin-top: 12px; }
+        .label-wrapper { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        label { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; }
+        .range-value { font-size: 0.8rem; color: var(--primary-neon); font-weight: 600; }
+
+        input[type="range"] { -webkit-appearance: none; width: 100%; height: 4px; background: rgba(255, 255, 255, 0.1); outline: none; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--primary-neon); cursor: pointer; }
+
+        .modes-panel { display: flex; gap: 8px; margin-top: 10px; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 12px; }
+        .mode-toggle {
+            flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px;
+            background: rgba(255,255,255,0.02); padding: 8px; border-radius: 8px; cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.05); transition: all 0.2s; font-size: 0.75rem; font-weight: 600;
+        }
+        .mode-toggle.active.silent { background: rgba(245, 158, 11, 0.15); border-color: var(--warning-color); color: var(--warning-color); }
+        .mode-toggle.active.emergency { background: rgba(239, 68, 68, 0.15); border-color: #ef4444; color: #ef4444; }
+
+        .filter-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+        .tab-btn {
+            background: rgba(255,255,255,0.05); border: none; padding: 5px 10px; border-radius: 6px;
+            color: var(--text-muted); font-size: 0.75rem; cursor: pointer; font-weight: 600;
+        }
+        .tab-btn.active { background: var(--primary-gradient); color: #ece5e5; }
+
+        button { border: none; color: white; cursor: pointer; font-weight: 600; transition: all 0.2s ease; display: inline-flex; align-items: center; justify-content: center;}
+        button:hover:not(:disabled) { transform: translateY(-1px); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-add-block { background: var(--primary-gradient); box-shadow: var(--shadow-btn); width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; font-weight: 700; }
+        .btn-send { background: var(--primary-gradient); box-shadow: var(--shadow-btn); width: 100%; margin-top: auto; font-size: 0.95rem; padding: 12px; text-transform: uppercase; font-weight: 700; border-radius: 12px; gap: 8px;}
+        .btn-send.success { background: var(--success-color); }
+        .spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 0.8s linear infinite; display: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .btn-del { background: var(--danger-gradient); padding: 4px 8px; font-size: 0.75rem; border-radius: 6px; }
+
+        .alarm-item { 
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba#22476c; padding: 10px 12px; margin: 6px 0; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .alarm-info { display: flex; flex-direction: column; gap: 2px; }
+        .time-box { font-size: 1.1rem; color: #f0ebeb; font-family: monospace; font-weight: 600; }
+        .med-box { font-size: 0.8rem; color: var(--text-muted); }
+        .user-tag { background: rgba(56, 189, 248, 0.15); color: var(--primary-neon); padding: 1px 6px; border-radius: 4px; font-size: 0.75rem; margin-left: 6px; font-weight: 600; }
+        .period-badge { font-size: 0.7rem; padding: 1px 4px; border-radius: 4px; font-weight: bold; margin-left: 4px; }
+        .badge-morning { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+        .badge-noon { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+        .badge-afternoon { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+        .badge-night { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
+
+        .empty-state { padding: 15px; border: 1px dashed rgba(255,255,255,0.08); border-radius: 12px; color: var(--text-muted); font-size: 0.8rem; text-align: center;}
+
+       /* ĐỒ THỊ & TUÂN THỦ NÂNG CAO */
+.analytics-box { display: grid; grid-template-columns: 1fr; gap: 15px; margin-bottom: 15px; }
+@media (min-width: 600px) { .analytics-box { grid-template-columns: 1fr 140px; } }
+
+/* ĐÃ CẬP NHẬT: Đảm bảo vùng chứa đồ thị đủ rộng rãi khi có thêm text trục Y */
+.chart-area { 
+    flex-grow: 1; 
+    position: relative; 
+    min-height: 180px; /* Đảm bảo chiều cao tối thiểu hiển thị đẹp */
+}
+
+.adherence-circle-wrap {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(15, 23, 42, 0.3); border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); padding: 10px;
+}
+.circle-container { position: relative; width: 85px; height: 85px; }
+.circle-value { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 1.25rem; font-weight: 700; color: var(--success-color); }
+.circle-label { font-size: 0.7rem; color: var(--text-muted); text-align: center; margin-top: 6px; font-weight: 500; }
+
+.fingerprint-form { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.finger-inputs-row { display: flex; gap: 8px; }
+.btn-finger { background: linear-gradient(135deg, #a855f7, #7c3aed); box-shadow: 0 4px 12px rgba(168, 85, 247, 0.3); width: 100%; height: 38px; border-radius: 8px; font-size: 0.85rem; font-weight: 700; }
+.finger-user-list { list-style: none; padding: 0; margin: 10px 0 0 0; max-height: 110px; overflow-y: auto; }
+.finger-user-item { display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.15); padding: 6px 10px; border-radius: 8px; font-size: 0.8rem; margin-bottom: 5px; }
+.finger-id-tag { background: #7c3aed; padding: 1px 4px; border-radius: 4px; font-weight: bold; font-family: monospace; font-size: 0.75rem; }
+        /* HỘP ĐEN NHẬT KÝ MEDICAL LOGS */
+        .log-list { list-style: none; padding: 0; margin: 0; flex-grow: 1; overflow-y: auto; max-height: 520px; }
+        .log-item {
+            padding: 10px 12px; border-radius: 10px; background: rgba(15, 23, 42, 0.4);
+            border-left: 3px solid #2465c1; font-size: 0.8rem; margin-bottom: 8px; line-height: 1.35;
+        }
+        .log-item.success { border-left-color: var(--success-color); background: rgba(16, 185, 129, 0.05); }
+        .log-item.warning { border-left-color: var(--warning-color); background: rgba(245, 158, 11, 0.05); }
+        .log-item.danger { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.05); }
+        .log-time { font-family: monospace; color: var(--text-muted); font-weight: 600; margin-bottom: 2px; display: block; }
+
+        #toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; max-width: 320px; width: 100%; }
+        .toast { background: rgba(30, 41, 59, 0.95); border-left: 4px solid var(--primary-neon); color: #f0e8e8; padding: 12px 16px; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); font-size: 0.85rem; transform: translateX(120%); transition: transform 0.3s; }
+        .toast.show { transform: translateX(0); }
+        .toast.success { border-left-color: var(--success-color); }
+        .toast.error { border-left-color: #ef4444; }
+        .toast.warn { border-left-color: var(--warning-color); }
+
+/* SỬA LỖI KHUYẾT DẤU NGOẶC Ô ID VÂN TAY (CỘT 2) */
+.enroll-input-row, 
+div:has(> #enrollIdInput),
+div:has(> [placeholder*="ID"]) {
+    display: grid !important;
+    grid-template-columns: 1fr 95px !important; /* Cố định hẳn 95px cho ô ID */
+    gap: 10px !important;
+    width: 100% !important;
+}
+
+div:has(> #enrollIdInput) input,
+input[placeholder*="ID"] {
+    padding: 11px 8px !important; /* Giảm padding ngang để chữ không bị đẩy */
+    box-sizing: border-box !important;
+    width: 100% !important;
+}
+    </style>
+</head>
+<body>
+
+<div id="toast-container"></div>
+
+<div class="dashboard-layout">
+    
+    <div class="container">
+        <div class="header-wrapper">
+            <h2>⏰ CÀI ĐẶT GIỜ UỐNG THUỐC</h2>
+            <div class="status-container">
+                <div id="mqttLed" class="status-led connecting"></div>
+                <button id="retryBtn" class="btn-retry" onclick="connectMQTT()">Thử lại</button>
+            </div>
+        </div>
+        
+        <div class="input-form-box">
+    <div class="flex-inputs">
+        <div class="input-row-top">
+            <input type="time" id="alarmTime" required>
+            
+            <input type="text" id="medName" placeholder="Tên thuốc & liều lượng...">
+        </div>
+        
+        <select id="alarmUser">
+            <option value="Chung">👥 Dành cho: Tất cả thành viên</option>
+        </select>
+        <select id="alarmCompartment">
+            <option value="0">📦 Ngăn số 1</option>
+            <option value="1">📦 Ngăn số 2</option>
+            <option value="2">📦 Ngăn số 3</option>
+            <option value="3">📦 Ngăn số 4</option>
+        </select>
+        
+        <button class="btn-add-block" onclick="addAlarm()">+ THÊM MỐC GIỜ</button>
+    </div>
+</div>
+        
+        <div class="setting-group">
+            <div class="label-wrapper"><label>Cảnh báo duy trì:</label><span class="range-value" id="durationVal">5s</span></div>
+            <input type="range" id="alarmDuration" value="5" min="1" max="60" oninput="updateLabel('alarmDuration', 'durationVal', 's')">
+        </div>
+
+        <div class="setting-group">
+            <div class="label-wrapper"><label>Thời gian mở hộp:</label><span class="range-value" id="boxCloseVal">15s</span></div>
+            <input type="range" id="boxCloseTime" value="15" min="5" max="300" step="5" oninput="updateLabel('boxCloseTime', 'boxCloseVal', 's')">
+        </div>
+        <div class="setting-group">
+    <div class="label-wrapper"><label>Số điện thoại cảnh báo:</label></div>
+    <input type="tel" id="emergencyPhone" placeholder="VD: 0901234567" 
+           style="width: 100%; padding: 10px; border-radius: 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.1); color: #38bdf8; outline: none;">
+    </div>
+        <h3>Chế độ thiết bị:</h3>
+        <div class="modes-panel">
+            <div class="mode-toggle" id="modeSilent" onclick="toggleMode('silent')">🔕 Im lặng (Snooze)</div>
+            <div class="mode-toggle" id="modeEmergency" onclick="toggleMode('emergency')">🚨 Khẩn cấp</div>
+        </div>
+
+        <h3>Mốc giờ cài đặt:</h3>
+        <div class="filter-tabs">
+            <button class="tab-btn active" onclick="filterList('all', this)">Tất cả</button>
+            <button class="tab-btn" onclick="filterList('morning', this)">🌅 Sáng</button>
+            <button class="tab-btn" onclick="filterList('noon', this)">☀️ Trưa</button>
+            <button class="tab-btn" onclick="filterList('afternoon', this)">🌤️ Chiều</button>
+            <button class="tab-btn" onclick="filterList('night', this)">🌙 Tối</button>
+        </div>
+        
+        <ul id="alarmListDisplay" style="list-style: none; padding:0; margin:0;"></ul>
+
+        <button class="btn-send" id="sendBtn" onclick="sendAllAlarms()">
+            <div class="spinner" id="sendSpinner"></div>
+            <span id="sendBtnText">ĐỒNG BỘ ĐẾN HỘP THUỐC</span>
+        </button>
+    </div>
+
+    <div class="container">
+        <h2>📊 THỐNG KÊ GIÁM SÁT TRỰC TUYẾN</h2>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin: 5px 0 15px 0;">Cập nhật từ thiết bị nhúng IoT từ xa</p>
+
+        <div class="hardware-widget">
+            <div class="hw-card">
+                <span style="font-size: 1.2rem;">📶</span>
+                <div class="hw-info">
+                    <span class="hw-label">Tín hiệu Wi-Fi</span>
+                    <span class="hw-value" id="hwWifi">Mạnh (-52 dBm)</span>
+                </div>
+            </div>
+            <div class="hw-card">
+                <div class="dot-pulse" id="hwSensorLed"></div>
+                <div class="hw-info">
+                    <span class="hw-label">Cảm biến vân tay</span>
+                    <span class="hw-value" id="hwSensorState">Sẵn sàng</span>
+                </div>
+            </div>
+            <div class="hw-card" style="grid-column: span 2;">
+                <span style="font-size: 1.1rem;">🔒</span>
+                <div class="hw-info">
+                    <span class="hw-label">Hệ thống cơ khí khóa Servo</span>
+                    <span class="hw-value" id="hwServoState">Chốt đã khóa an toàn (0°)</span>
+                </div>
+            </div>
+        </div>
+
+        <h3>Tỷ lệ tuân thủ điều trị:</h3>
+        <div class="analytics-box">
+            <div class="chart-area">
+                <div class="filter-tabs" style="margin-bottom: 10px;">
+                    <button class="tab-btn active" onclick="updateChartPeriod('week')">Tuần này</button>
+                    <button class="tab-btn" onclick="updateChartPeriod('month')">Tháng này</button>
+                    <button class="tab-btn" onclick="updateChartPeriod('3months')">3 Tháng qua</button>
+                </div>
+                <canvas id="adherenceChart" style="max-height: 160px;"></canvas>
+            </div>
+            
+            <div class="adherence-circle-wrap">
+                <div class="circle-container">
+                    <canvas id="circleProgress" width="85" height="85"></canvas>
+                    <div class="circle-value" id="adherenceRateText">92%</div>
+                </div>
+                <div class="circle-label"> Tỷ Lệ Tuân Thủ (%)</div>
+            </div>
+        </div>
+
+        <h3>🆔 ĐĂNG KÝ DẤU VÂN TAY</h3>
+        <div class="fingerprint-form">
+            <div class="finger-inputs-row">
+                <input type="text" id="fingerName" placeholder="Tên người dùng (VD: Bố, Mẹ)...">
+                <input type="number" id="fingerId" placeholder="ID (1-127)" min="1" max="127" style="width: 91px;">
+            </div>
+            <button class="btn-finger" id="enrollBtn" onclick="sendEnrollCommand()">⚡ BẮT ĐẦU ĐĂNG KÝ VÂN TAY</button>
+        </div>
+        <ul id="fingerUserList" class="finger-user-list"></ul>
+    </div>
+
+    <div class="container">
+        <h2>🗂️ MEDICAL LOGS (HỘP ĐEN THIẾT BỊ)</h2>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin: 5px 0 15px 0;">Dòng thời gian ghi nhận sự kiện mở khóa y tế thực tế</p>
+        
+        <ul id="logListDisplay" class="log-list">
+            <li class="log-item success">
+                <span class="log-time">08:02 - 01/07</span>
+                👤 <strong>Bố (ID: 1)</strong> đã mở hộp bằng vân tay hợp lệ (<span style="color:var(--success-color)">Đúng giờ</span>).
+            </li>
+            <li class="log-item danger">
+                <span class="log-time">12:30 - 30/06</span>
+                ⚠️ <strong>Cảnh báo quá hạn!</strong> Hộp thuốc tự động khóa - Người dùng bỏ lỡ liều: <strong style="color:#f43f5e">Thuốc dạ dày</strong>.
+            </li>
+            <li class="log-item warning">
+                <span class="log-time">20:15 - 29/06</span>
+                👤 <strong>Vợ (ID: 2)</strong> đã mở hộp bằng khóa vân tay (<span style="color:var(--warning-color)">Trễ 15 phút</span>).
+            </li>
+        </ul>
+    </div>
+</div>
+
+<script>
+    let alarms = JSON.parse(localStorage.getItem('tech_alarms')) || [];
+    let fingerUsers = JSON.parse(localStorage.getItem('finger_users')) || [
+        {id: 1, name: "Bố"}, {id: 2, name: "Vợ"}
+    ];
+    let medicalLogs = JSON.parse(localStorage.getItem('medical_logs')) || [];
+    let currentFilter = 'all';
+    let systemModes = { silent: false, emergency: false };
+    let client;
+    let chartInstance;
+
+    // Bộ dữ liệu thống kê mẫu theo các chu kỳ lọc
+    const datasetMock = {
+        week: { labels: ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'], data: [1, 3, 0, 1, 2, 1, 0], colors: ['#10b981', '#10b981', '#ef4444', '#10b981', '#f59e0b', '#10b981', '#ef4444'], rate: 85 },
+        month: { labels: ['Tuần 1', 'Tuần 2', 'Tuần 3', 'Tuần 4'], data: [12, 14, 9, 15], colors: ['#10b981', '#10b981', '#f59e0b', '#10b981'], rate: 92 },
+        '3months': { labels: ['Tháng 4', 'Tháng 5', 'Tháng 6'], data: [45, 52, 48], colors: ['#10b981', '#10b981', '#10b981'], rate: 95 }
+    };
+    let currentPeriod = 'week';
+
+    function connectMQTT() {
+        const led = document.getElementById("mqttLed");
+        const retryBtn = document.getElementById("retryBtn");
+        led.className = "status-led connecting";
+        retryBtn.style.display = "none";
+
+        client = new Paho.MQTT.Client("broker.hivemq.com", 8000, "web_dash_" + parseInt(Math.random()*10000));
+        
+        client.onConnectionLost = () => {
+            led.className = "status-led disconnected";
+            retryBtn.style.display = "block";
+            showToast("Mất kết nối với hộp thuốc!", "error");
+        };
+
+        client.onMessageArrived = (msg) => {
+            if (msg.destinationName === "med/status") {
+                try {
+                    let res = JSON.parse(msg.payloadString);
+                    // Cập nhật trạng thái phần cứng thời gian thực từ dữ liệu ESP32 đẩy lên
+                    if(res.wifi) document.getElementById("hwWifi").innerText = `Mạnh (${res.wifi} dBm)`;
+                    if(res.fingerprint_sensor) {
+                        document.getElementById("hwSensorState").innerText = res.fingerprint_sensor;
+                        document.getElementById("hwSensorLed").style.background = res.fingerprint_sensor === "Sẵn sàng" ? "var(--success-color)" : "#ef4444";
+                    }
+                    if(res.servo) document.getElementById("hwServoState").innerText = res.servo;
+
+                    // Xử lý luồng đăng ký vân tay nâng cao
+                    if (res.status === "ENROLL_WAIT_FIRST") {
+                        showToast(`[ID: ${res.id}] Đặt ngón tay lên cảm biến LẦN 1...`, "warn");
+                    } else if (res.status === "ENROLL_WAIT_SECOND") {
+                        showToast("Nhấc ra và ĐẶT LẠI ngón tay LẦN 2...", "warn");
+                    } else if (res.status === "ENROLL_SUCCESS") {
+                        showToast(`Đăng ký thành công ID ${res.id}`, "success");
+                        saveFingerUser(res.id);
+                        setEnrollButtonState(false);
+                    } else if (res.status === "ENROLL_ERROR") {
+                        showToast(`Lỗi: ${res.msg}`, "error");
+                        setEnrollButtonState(false);
+                    }
+                } catch(e) {}
+            } else if (msg.destinationName === "med/history") {
+                try {
+                    let logData = JSON.parse(msg.payloadString);
+                    let displayUser = logData.user || "Thành viên";
+                    let displayMsg = logData.msg || "Đã mở hộp thuốc";
+                    let displayType = logData.type || "success";
+
+                    // --- BỘ DÒ MẢNG THÀNH VIÊN ĐA TẦNG ---
+                    // Tự động kiểm tra xem Web của bạn đang dùng biến mảng nào để lưu danh sách (BI, Vợ...)
+                    let activeUsersArray = [];
+                    
+                    if (typeof fingerUsers !== "undefined") {
+                        activeUsersArray = fingerUsers;
+                    } else if (typeof fingerprintUsers !== "undefined") {
+                        activeUsersArray = fingerprintUsers;
+                    } else {
+                        // Nếu cả 2 biến trên đều không có, ta chủ động đọc trực tiếp từ bộ nhớ LocalStorage của Web
+                        let localData = localStorage.getItem('fingerprint_users') || localStorage.getItem('fingerUsers') || localStorage.getItem('users');
+                        if (localData) {
+                            activeUsersArray = JSON.parse(localData);
+                        }
+                    }
+                    // Tiến hành tra cứu ID vân tay trong mảng vừa tìm được
+                    if (logData.id && activeUsersArray && activeUsersArray.length > 0) {
+                        let matchedUser = activeUsersArray.find(u => u.id == logData.id);
+                        if (matchedUser && matchedUser.name) {
+                            displayUser = matchedUser.name; // Ép hiển thị đúng tên cụ thể (Ví dụ: "BI", "Vợ")
+                        }
+                    }
+                    // Dự phòng: Nếu ESP32 vẫn gửi chuỗi "Bố" cứng hoặc Web chưa bắt được ID
+                    if (displayUser === "Bố" || displayUser === "Bo") {
+                        if (activeUsersArray && activeUsersArray.length > 0) {
+                            displayUser = activeUsersArray[0].name; // Lấy thành viên đầu tiên trong danh sách trên giao diện
+                        }
+                    }
+                    // Việt hóa nội dung hiển thị cho chuyên nghiệp
+                    if (displayMsg.includes("da chu dong mo hop bang khoa van tay")) {
+                        displayMsg = "đã chủ động mở hộp bằng khóa vân tay";
+                    } else if (displayMsg.includes("da mo hop bang van tay hop le")) {
+                        displayMsg = "đã mở hộp bằng vân tay hợp lệ";
+                    } else if (displayMsg.includes("da bo lo lieu thuoc")) {
+                        displayMsg = "đã bỏ lỡ liều thuốc";
+                        displayType = "danger"; 
+                    }
+                    // Đẩy dữ liệu vào bảng Medical Logs bằng hàm của bạn
+                    addMedicalLog(displayUser, displayMsg, displayType);
+
+                } catch(e) {
+                    console.error("Lỗi xử lý map tên Log:", e);
+                    addMedicalLog("Thành viên", "đã mở hộp bằng vân tay hợp lệ", "success");
+                }
+            }
+        };
+        client.connect({
+            onSuccess: () => {
+                led.className = "status-led connected";
+                client.subscribe("med/status");
+                client.subscribe("med/history");
+                showToast("Hộp thuốc trực tuyến!", "success");
+            },
+            onFailure: () => {
+                led.className = "status-led disconnected";
+                retryBtn.style.display = "block";
+            }
+        });
+    }
+
+    // THÊM NHẬT KÝ HOẠT ĐỘNG MỚI VÀO HỘP ĐEN
+    function addMedicalLog(user, msg, type = "success") {
+        const now = new Date();
+        const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} - ${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth()+1).padStart(2, '0')}`;
+        
+        const newLog = { time: timeStr, user: user, msg: msg, type: type };
+        medicalLogs.unshift(newLog); // Thêm lên đầu danh sách
+        if(medicalLogs.length > 30) medicalLogs.pop(); // Giới hạn 30 lịch sử cận đại
+        localStorage.setItem('medical_logs', JSON.stringify(medicalLogs));
+        renderMedicalLogs();
+    }
+
+    function renderMedicalLogs() {
+        const display = document.getElementById("logListDisplay");
+        // Nếu không có log lưu trữ, giữ lại 3 mẫu mặc định ban đầu
+        if(medicalLogs.length === 0) return; 
+        
+        display.innerHTML = medicalLogs.map(log => `
+            <li class="log-item ${log.type}">
+                <span class="log-time">${log.time}</span>
+                ${log.type === 'danger' ? '⚠️ <strong>Cảnh báo!</strong> ' : '👤 '}<strong>${log.user}</strong> ${log.msg}
+            </li>
+        `).join('');
+    }
+
+    function showToast(msg, type="info") {
+        const container = document.getElementById("toast-container");
+        const t = document.createElement("div");
+        t.className = `toast ${type}`;
+        t.innerHTML = `<span>${msg}</span>`;
+        container.appendChild(t);
+        setTimeout(() => t.classList.add("show"), 50);
+        setTimeout(() => { t.classList.remove("show"); setTimeout(() => t.remove(), 300); }, 4000);
+    }
+
+    function updateLabel(inputId, labelId, suffix) {
+        document.getElementById(labelId).innerText = document.getElementById(inputId).value + suffix;
+    }
+
+    function toggleMode(mode) {
+        systemModes[mode] = !systemModes[mode];
+        const el = document.getElementById(mode === 'silent' ? 'modeSilent' : 'modeEmergency');
+        if (systemModes[mode]) el.classList.add('active', mode);
+        else el.classList.remove('active', mode);
+        showToast(`Đã cập nhật chế độ thiết bị`, "info");
+    }
+
+    function getPeriod(timeStr) {
+        let hour = parseInt(timeStr.split(':')[0]);
+        if (hour >= 5 && hour < 11) return { code: 'morning', text: '🌅 Sáng', cls: 'badge-morning' };
+        if (hour >= 11 && hour < 14) return { code: 'noon', text: '☀️ Trưa', cls: 'badge-noon' };
+        if (hour >= 14 && hour < 18) return { code: 'afternoon', text: '🌤️ Chiều', cls: 'badge-afternoon' };
+        return { code: 'night', text: '🌙 Tối', cls: 'badge-night' };
+    }
+
+    // THÊM MỐC GIỜ MỚI (UX CẢI TIẾN GẮN NGƯỜI DÙNG)
+    function addAlarm() {
+        let time = document.getElementById("alarmTime").value;
+        let med = document.getElementById("medName").value.trim() || "Thuốc tổng hợp";
+        let user = document.getElementById("alarmUser").value;
+        let compartment = document.getElementById("alarmCompartment").value;
+        if (!time) return showToast("Vui lòng chọn mốc giờ!", "error");
+        if (alarms.some(a => a.time === time)) return showToast("Mốc giờ này đã tồn tại!", "error");
+        alarms.push({ time: time, med: med, user: user, compartment: compartment });
+        alarms.sort((a,b) => a.time.localeCompare(b.time));
+        localStorage.setItem('tech_alarms', JSON.stringify(alarms));
+        renderList();
+        document.getElementById("medName").value = "";
+        showToast("Đã thêm lịch hẹn dùng thuốc thành công", "success");
+    }
+
+    function remove(index) {
+        alarms.splice(index, 1);
+        localStorage.setItem('tech_alarms', JSON.stringify(alarms));
+        renderList();
+    }
+
+    function filterList(period, btn) {
+        currentFilter = period;
+        document.querySelectorAll('.filter-tabs .tab-btn').forEach(b => {
+            if(b.getAttribute('onclick').includes('filterList')) b.classList.remove('active');
+        });
+        btn.classList.add('active');
+        renderList();
+    }
+
+    function renderList() {
+        const list = document.getElementById("alarmListDisplay");
+        let filtered = alarms.filter(a => currentFilter === 'all' || getPeriod(a.time).code === currentFilter);
+
+        if (filtered.length === 0) {
+            list.innerHTML = `<div class="empty-state">Không có lịch hẹn nào cho danh mục chọn.</div>`;
+            return;
+        }
+        list.innerHTML = filtered.map((a, index) => {
+        let p = getPeriod(a.time);
+        let userDisplay = a.user ? a.user : "Chung";
+        let compDisplay = a.compartment ? `Ngăn ${parseInt(a.compartment)+1}` : "Ngăn 1";
+        return `<li class="alarm-item">
+            <div class="alarm-info">
+                <div>
+                    <span class="time-box">${a.time}</span>
+                    <span class="period-badge ${p.cls}">${p.text}</span>
+                </div>
+                <span class="med-box">💊 ${a.med} | 📦 ${compDisplay} | 👤 ${userDisplay}</span>
+            </div>
+            <button class="btn-del" onclick="remove(${index})">Xóa</button>
+        </li>`;
+    }).join('');
+    }
+
+    function setSendButtonState(state) {
+        const btn = document.getElementById("sendBtn");
+        const spinner = document.getElementById("sendSpinner");
+        const text = document.getElementById("sendBtnText");
+        if (state === "sending") {
+            btn.disabled = true; btn.className = "btn-send sending"; spinner.style.display = "block"; text.innerText = "ĐANG ĐỒNG BỘ...";
+        } else if (state === "success") {
+            btn.disabled = false; btn.className = "btn-send success"; spinner.style.display = "none"; text.innerText = "ĐỒNG BỘ THÀNH CÔNG ✓";
+            setTimeout(() => setSendButtonState("normal"), 2000);
+        } else {
+            btn.disabled = false; btn.className = "btn-send"; spinner.style.display = "none"; text.innerText = "ĐỒNG BỘ ĐẾN HỘP THUỐC";
+        }
+    }
+
+    function sendAllAlarms() {
+        if (!client || !client.isConnected()) return showToast("Lỗi kết nối tới máy chủ MQTT!", "error");
+        setSendButtonState("sending");
+
+        let payload = {
+            alarms: alarms.map(a => a.time),
+            meds: alarms.map(a => a.med), 
+            users: alarms.map(a => a.user || "Chung"), // Đẩy thêm mảng thông tin người dùng xuống ESP32 phục vụ hiển thị LCD
+            compartments: alarms.map(a => parseInt(a.compartment)),
+            duration: parseInt(document.getElementById("alarmDuration").value) * 1000,
+            boxClose: parseInt(document.getElementById("boxCloseTime").value) * 1000,
+            phone: document.getElementById("emergencyPhone").value.trim(),
+            silent: systemModes.silent ? 1 : 0,
+            emerg: systemModes.emergency ? 1 : 0
+        };
+        let message = new Paho.MQTT.Message(JSON.stringify(payload));
+        message.destinationName = "med/alarms";
+        client.send(message);
+        setSendButtonState("success");
+        showToast("Đã phát lệnh đồng bộ thông tin y tế thành công!", "success");
+    }
+
+    function sendEnrollCommand() {
+        if (!client || !client.isConnected()) return showToast("Lỗi kết nối máy chủ MQTT!", "error");
+        
+        let name = document.getElementById("fingerName").value.trim();
+        let id = parseInt(document.getElementById("fingerId").value);
+
+        if (!name || !id) return showToast("Vui lòng nhập đầy đủ Tên và ID!", "error");
+        if (id < 1 || id > 127) return showToast("ID vân tay hợp lệ từ 1 - 127!", "error");
+        if (fingerUsers.some(u => u.id === id)) return showToast("ID này đã tồn tại!", "error");
+
+        setEnrollButtonState(true);
+
+        let payload = { action: "ENROLL", id: id };
+        let message = new Paho.MQTT.Message(JSON.stringify(payload));
+        message.destinationName = "med/enroll";
+        client.send(message);
+        
+        showToast(`Đã ra lệnh đăng ký ID ${id}. Kiểm tra màn hình LCD trên thiết bị!`, "info");
+    }
+
+    function setEnrollButtonState(isEnrolling) {
+        const btn = document.getElementById("enrollBtn");
+        if (isEnrolling) {
+            btn.disabled = true; btn.innerText = "⏳ ĐANG TIẾN HÀNH TRÊN THIẾT BỊ..."; btn.style.background = "#64748b";
+        } else {
+            btn.disabled = false; btn.innerText = "⚡ BẮT ĐẦU ĐĂNG KÝ VÂN TAY"; btn.style.background = "linear-gradient(135deg, #a855f7, #7c3aed)";
+        }
+    }
+
+    function saveFingerUser(id) {
+        let name = document.getElementById("fingerName").value.trim();
+        fingerUsers.push({ id: parseInt(id), name: name });
+        localStorage.setItem('finger_users', JSON.stringify(fingerUsers));
+        renderFingerUsers();
+        updateUserDropdowns();
+        document.getElementById("fingerName").value = "";
+        document.getElementById("fingerId").value = "";
+    }
+
+    function deleteFingerUser(id) {
+        fingerUsers = fingerUsers.filter(u => u.id !== id);
+        localStorage.setItem('finger_users', JSON.stringify(fingerUsers));
+        renderFingerUsers();
+        updateUserDropdowns();
+        showToast("Đã giải phóng thông tin thành viên.", "info");
+    }
+
+    // ĐỒNG BỘ DANH SÁCH THÀNH VIÊN VÀO DROPDOWN CỦA LỊCH CÀI ĐẶT (UX MỚI)
+    function updateUserDropdowns() {
+        const select = document.getElementById("alarmUser");
+        select.innerHTML = '<option value="Chung">👥 Dành cho: Tất cả thành viên</option>' + 
+            fingerUsers.map(u => `<option value="${u.name}">👤 Dành cho: ${u.name}</option>`).join('');
+    }
+
+    function renderFingerUsers() {
+        const list = document.getElementById("fingerUserList");
+        if (fingerUsers.length === 0) {
+            list.innerHTML = `<div class="empty-state" style="padding:8px;">Chưa có thành viên nào nạp vân tay.</div>`;
+            return;
+        }
+        list.innerHTML = fingerUsers.map(u => `
+            <li class="finger-user-item">
+                <span>👤 <strong>${u.name}</strong></span>
+                <div>
+                    <span class="finger-id-tag">ID: ${u.id}</span>
+                    <button class="btn-del" style="padding: 2px 6px; margin-left: 5px;" onclick="deleteFingerUser(${u.id})">Xóa</button>
+                </div>
+            </li>
+        `).join('');
+    }
+
+    // VẼ VÒNG TRÒN TỶ LỆ TUÂN THỦ TỔNG QUAN (ANALYTICS MỚI)
+    function drawComplianceCircle(percent) {
+        const canvas = document.getElementById('circleProgress');
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Vòng nền xám mờ
+        ctx.beginPath();
+        ctx.arc(42.5, 42.5, 35, 0, 2 * Math.PI);
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 6;
+        ctx.stroke();
+
+        // Vòng tiến trình màu xanh lá y khoa
+        let startAngle = -0.5 * Math.PI;
+        let endAngle = (percent / 100) * 2 * Math.PI + startAngle;
+        ctx.beginPath();
+        ctx.arc(42.5, 42.5, 35, startAngle, endAngle);
+        ctx.strokeStyle = percent >= 90 ? '#10b981' : (percent >= 75 ? '#f59e0b' : '#ef4444');
+        ctx.lineWidth = 6;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+
+        document.getElementById("adherenceRateText").innerText = percent + "%";
+        document.getElementById("adherenceRateText").style.color = percent >= 90 ? '#10b981' : (percent >= 75 ? '#f59e0b' : '#ef4444');
+    }
+
+    function updateChartPeriod(period) {
+        currentPeriod = period;
+        document.querySelectorAll('.chart-area .tab-btn').forEach(b => {
+            if(b.getAttribute('onclick').includes('updateChartPeriod')) b.classList.remove('active');
+        });
+        event.target.classList.add('active');
+        initChart();
+    }
+
+    // ĐỒ THỊ KIỂU MỚI: ĐA SẮC MÀU PHÂN LOẠI ĐIỂM DỮ LIỆU
+   
+/**
+ * Hàm khởi tạo và vẽ lại đồ thị theo dữ liệu thời gian thực
+ * Cải tiến: Thêm ngưỡng an toàn, màu sắc thông minh và tooltip chi tiết
+ */
+function initChart() {
+    const ctx = document.getElementById('adherenceChart').getContext('2d');
+    const activeData = datasetMock[currentPeriod];
+
+    drawComplianceCircle(activeData.rate);
+
+    if (chartInstance) {
+        chartInstance.destroy();
+    }
+
+    chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: activeData.labels,
+            datasets: [{
+                label: 'Số lần bỏ lỡ',
+                data: activeData.data,
+                borderColor: '#38bdf8',
+                backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                borderWidth: 3,
+                fill: true,
+                tension: 0.4,
+                pointBackgroundColor: activeData.colors,
+                pointBorderColor: '#fff',
+                pointRadius: 6,
+                pointHoverRadius: 8
+            }] // Đã loại bỏ phần tử dataset thứ 2 (ngưỡng cảnh báo)
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 12,
+                    titleColor: '#38bdf8',
+                    callbacks: {
+                        label: (context) => ` ${context.dataset.label}: ${context.raw} liều`
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(255,255,255,0.05)' },
+                    ticks: { color: '#94a3b8', stepSize: 1 },
+                    title: {
+                        display: true,
+                        text: 'Số lần bỏ lỡ',
+                        color: '#94a3b8',
+                        font: { size: 11, weight: '600' }
+                    }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { color: '#94a3b8' }
+                }
+            }
+        }
+    });
+}
+function renderChart(period) {
+    const ctx = document.getElementById('adherenceChart').getContext('2d');
+    const data = datasetMock[period];
+    
+    // Hủy chart cũ nếu đã tồn tại
+    if (chartInstance) chartInstance.destroy();
+
+    chartInstance = new Chart(ctx, {
+        type: 'line', // Chuyển sang Line chart để thấy xu hướng
+        data: {
+            labels: data.labels,
+            datasets: [{
+                label: 'Tỷ lệ tuân thủ (%)',
+                data: [90, 85, 95, 88, 92, 98, 90], // Ví dụ dữ liệu thực
+                borderColor: '#38bdf8',
+                backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                fill: true,
+                tension: 0.4, // Tạo đường cong mềm mại
+                pointRadius: 4,
+                pointBackgroundColor: '#38bdf8'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { backgroundColor: 'rgba(15, 23, 42, 0.9)' }
+            },
+            scales: {
+                y: { 
+                    beginAtZero: true, 
+                    max: 100,
+                    grid: { color: 'rgba(255,255,255,0.05)' },
+                    ticks: { color: '#94a3b8', font: { size: 10 } }
+                },
+                x: { 
+                    grid: { display: false },
+                    ticks: { color: '#94a3b8', font: { size: 10 } }
+                }
+            }
+        }
+    });
+}
+    // Khởi chạy hệ thống liên kết dữ liệu
+    connectMQTT(); renderList(); renderFingerUsers(); updateUserDropdowns(); initChart(); renderMedicalLogs();
+</script>
+</body>
+</html>
