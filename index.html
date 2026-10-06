@@ -264,14 +264,6 @@ input[placeholder*="ID"] {
     white-space: nowrap;
     gap: 4px;
 }
-.btn-clear-logs {
-    background: var(--danger-gradient);
-    padding: 6px 12px;
-    font-size: 0.75rem;
-    border-radius: 8px;
-    white-space: nowrap;
-    gap: 4px;
-}
 .btn-export-logs {
     background: linear-gradient(135deg, #10b981, #047857);
     padding: 6px 12px;
@@ -374,10 +366,10 @@ input[type="text"], input[type="tel"], input[type="number"], select { font-size:
     text-align: center;
     text-shadow: 0 0 14px rgba(56,189,248,0.4);
     font-family: "Times New Roman", Times, serif;
+}
 #panel-about h2 {
     font-family: "Times New Roman", Times, serif;
     font-size: 1.6rem;
-}
 }
 /* ===== TAB ĐỒ ÁN: THU NHỎ CHỮ TRÊN ĐIỆN THOẠI ===== */
 @media (max-width: 700px) {
@@ -667,10 +659,16 @@ function handleStatus(raw) {
     if (res.status === "ENROLL_WAIT_FIRST") showToast(`[ID: ${res.id}] Đặt ngón tay lên cảm biến LẦN 1...`, "warn");
     else if (res.status === "ENROLL_WAIT_SECOND") showToast("Nhấc ra và ĐẶT LẠI ngón tay LẦN 2...", "warn");
     else if (res.status === "ENROLL_SUCCESS") {
+        clearTimeout(window.enrollTimer);
         showToast(`Đăng ký thành công ID ${res.id}`, "success");
         saveFingerUser(res.id); setEnrollButtonState(false);
     } else if (res.status === "ENROLL_ERROR") {
+        clearTimeout(window.enrollTimer);
         showToast(`Lỗi: ${res.msg}`, "error"); setEnrollButtonState(false);
+    } else if (res.status === "DELETE_SUCCESS") {
+        finishDelete(res.id, true);
+    } else if (res.status === "DELETE_ERROR") {
+        finishDelete(res.id, false, res.msg);
     }
 }
 function handleHistory(raw) {
@@ -980,6 +978,11 @@ let pendingEnrollName = "";
     if (fingerUsers.some(u => u.id === id)) return showToast("ID này đã tồn tại!", "error");
     setEnrollButtonState(true);
     pendingEnrollName = name;
+    clearTimeout(window.enrollTimer);
+    window.enrollTimer = setTimeout(() => {
+    setEnrollButtonState(false);
+    showToast("Thiết bị không phản hồi, hãy thử lại.", "error");
+    }, 60000);
     publish(T("enroll"), { action: "ENROLL", id: id, name: removeAccents(name) }, false);
     showToast(`Đã ra lệnh đăng ký ID ${id}. Kiểm tra màn hình LCD trên thiết bị!`, "info");
 }
@@ -1000,13 +1003,45 @@ let pendingEnrollName = "";
         document.getElementById("fingerName").value = "";
         document.getElementById("fingerId").value = "";
     }
-    function deleteFingerUser(id) {
+    let pendingDelete = {};   // các ID đang chờ ESP32 xác nhận xóa
+function deleteFingerUser(id) {
+    id = parseInt(id);
+    const u = fingerUsers.find(x => x.id === id);
+    if (!u) return;
+    if (!client || !client.isConnected())
+        return showToast("Chưa kết nối hộp thuốc, không thể xóa vân tay!", "error");
+    if (pendingDelete[id]) return;
+    if (!confirm(`Xóa vân tay của "${u.name}" (ID ${id}) khỏi hộp thuốc?\nNgười này sẽ không mở được hộp nữa.`)) return;
+
+    publish(T("cmd"), { action: "DELETE_FINGER", id: id }, false, 1);
+    showToast(`Đã gửi lệnh xóa ID ${id}, đang chờ hộp thuốc xác nhận...`, "info");
+
+    pendingDelete[id] = setTimeout(() => {
+        delete pendingDelete[id];
+        renderFingerUsers();
+        showToast(`Hộp thuốc không phản hồi, chưa xóa ID ${id}. Hãy thử lại.`, "error");
+    }, 10000);
+    renderFingerUsers();
+}
+function finishDelete(id, ok, msg) {
+    id = parseInt(id);
+    if (pendingDelete[id]) { clearTimeout(pendingDelete[id]); delete pendingDelete[id]; }
+    if (ok) {
+        const removed = fingerUsers.find(u => u.id === id);
+        if (removed) {
+            alarms.forEach(a => { if (a.user === removed.name) a.user = "Chung"; });
+            localStorage.setItem('tech_alarms', JSON.stringify(alarms));
+            renderList();
+        }
         fingerUsers = fingerUsers.filter(u => u.id !== id);
         localStorage.setItem('finger_users', JSON.stringify(fingerUsers));
-        renderFingerUsers();
         updateUserDropdowns();
-        showToast("Đã giải phóng thông tin thành viên.", "info");
+        showToast(`Đã xóa vân tay ID ${id}. Hãy bấm ĐỒNG BỘ để cập nhật lịch.`, "success");
+    } else {
+        showToast(`Xóa thất bại: ${msg || "lỗi cảm biến"}`, "error");
     }
+    renderFingerUsers();
+}
     // ĐỒNG BỘ DANH SÁCH THÀNH VIÊN VÀO DROPDOWN CỦA LỊCH CÀI ĐẶT (UX MỚI)
     function updateUserDropdowns() {
     const select = document.getElementById("alarmUser");
@@ -1024,7 +1059,9 @@ let pendingEnrollName = "";
             <span>👤 <strong>${escapeHtml(u.name)}</strong></span>
             <div>
                 <span class="finger-id-tag">ID: ${parseInt(u.id)}</span>
-                <button class="btn-del" style="padding: 2px 6px; margin-left: 5px;" onclick="deleteFingerUser(${parseInt(u.id)})">Xóa</button>
+                <button class="btn-del" style="padding: 2px 6px; margin-left: 5px;"
+        ${pendingDelete[u.id] ? 'disabled' : ''}
+        onclick="deleteFingerUser(${parseInt(u.id)})">${pendingDelete[u.id] ? 'Đang xóa...' : 'Xóa'}</button>
             </div>
         </li>
     `).join('');
