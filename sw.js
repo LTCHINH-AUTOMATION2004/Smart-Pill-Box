@@ -1,6 +1,6 @@
-const CACHE = 'smartpill-v1';
-const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './hop-thuoc.png'];
 
+const CACHE = 'smartpill-v3';
+const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './hop-thuoc.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)));
   self.skipWaiting();
