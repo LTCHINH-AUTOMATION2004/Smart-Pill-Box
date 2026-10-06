@@ -389,19 +389,23 @@ input[type="text"], input[type="tel"], input[type="number"], select { font-size:
         margin-bottom: 6px !important;
     }
 
-    /* Nhãn ở trên, nội dung ở dưới → nội dung có đủ chiều ngang */
+    /* Nhãn và nội dung nằm cùng một dòng */
     .info-row {
-        flex-direction: column !important;
-        gap: 2px !important;
+        flex-direction: row !important;
+        align-items: baseline !important;
+        gap: 8px !important;
         padding: 10px 0 !important;
         font-size: 1.05rem !important;
     }
     .info-label {
         min-width: 0 !important;
-        font-size: 0.9rem !important;
+        flex-shrink: 0;            /* nhãn không bị co lại */
+        white-space: nowrap;       /* nhãn không bị ngắt dòng */
+        font-size: 0.95rem !important;
     }
     .info-value {
-        font-size: 1.1rem !important;
+        flex: 1;                   /* nội dung chiếm phần còn lại */
+        font-size: 1.05rem !important;
         line-height: 1.35;
     }
 
