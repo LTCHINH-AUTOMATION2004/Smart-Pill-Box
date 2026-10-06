@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -741,13 +742,15 @@ function renderMedicalLogs() {
         display.innerHTML = `<div class="empty-state">Chưa có nhật ký nào.</div>`;
         return;
     }
+    const rec = getRecoveredSet();
     display.innerHTML = medicalLogs.map(log => `
         <li class="log-item ${escapeHtml(log.type)}">
             <span class="log-time">${escapeHtml(log.time)}</span>
             ${log.type === 'danger' ? '⚠️ <strong>Cảnh báo!</strong> ' : '👤 '}<strong>${escapeHtml(log.user)}</strong> ${escapeHtml(log.msg)}
+            ${rec.has(log) ? '<br><span style="color:var(--success-color)">✓ Đã lấy bù trong 15 phút (tính là tuân thủ)</span>' : ''}
         </li>
     `).join('');
-}   
+}
 function clearMedicalLogs() {
     if (medicalLogs.length === 0) return showToast("Nhật ký đang trống!", "warn");
     if (!confirm("Bạn có chắc muốn xóa toàn bộ nhật ký Medical Logs không? Hành động này không thể hoàn tác.")) return;
@@ -1110,6 +1113,31 @@ function getLogDate(log) {
     if (d > now) d.setFullYear(now.getFullYear() - 1);
     return d;
 }
+// Thời gian được phép lấy bù mà vẫn tính là tuân thủ
+const GRACE_MS = 15 * 60 * 1000;   // 15 phút
+
+// Tìm các bản ghi "bỏ lỡ" đã được lấy bù trong vòng 15 phút
+function getRecoveredSet() {
+    const recovered = new Set();
+    const toItem = log => ({ log: log, t: getLogDate(log) });
+    const dangers = medicalLogs.filter(l => l.type === 'danger')
+        .map(toItem).filter(x => x.t).sort((a, b) => a.t - b.t);
+    const catchups = medicalLogs.filter(l => l.type === 'warning')
+        .map(toItem).filter(x => x.t).sort((a, b) => a.t - b.t);
+
+    catchups.forEach(c => {
+        // các liều bỏ lỡ chưa được xử lý, nằm trong 15 phút trước lúc lấy bù
+        const cand = dangers.filter(x =>
+            !recovered.has(x.log) && x.t <= c.t && (c.t - x.t) <= GRACE_MS);
+        if (cand.length === 0) return;
+        // thiết bị chỉ lấy bù cho mốc giờ gần nhất, nên chỉ nhận nhóm mới nhất
+        const latest = Math.max(...cand.map(x => x.t.getTime()));
+        cand.forEach(x => {
+            if (latest - x.t.getTime() <= 5000) recovered.add(x.log);
+        });
+    });
+    return recovered;
+}
 // Thống kê theo khoảng thời gian từ nhật ký thật
 function buildStats(period) {
     const now = new Date();
@@ -1136,24 +1164,30 @@ function buildStats(period) {
     }
     const missed = labels.map(() => 0);
     const taken = labels.map(() => 0);
+    const recovered = labels.map(() => 0);
+    const recoveredSet = getRecoveredSet();
     medicalLogs.forEach(log => {
         const d = getLogDate(log);
         if (!d) return;
         const k = keyOf(d);
         if (k < 0) return;
-        if (log.type === 'danger') missed[k]++;
-        else if (log.type === 'success') taken[k]++;
+        if (log.type === 'danger') {
+            if (recoveredSet.has(log)) { taken[k]++; recovered[k]++; }   // lấy bù trong 15 phút
+            else missed[k]++;                                            // quá 15 phút hoặc chưa lấy
+        } else if (log.type === 'success') {
+            taken[k]++;
+        }
     });
     const sumT = taken.reduce((a, b) => a + b, 0);
     const sumM = missed.reduce((a, b) => a + b, 0);
     const rate = (sumT + sumM) === 0 ? null : Math.round(sumT / (sumT + sumM) * 100);
     const colors = labels.map((_, i) => {
         const total = taken[i] + missed[i];
-        if (total === 0) return '#64748b';                 // chưa có dữ liệu
-        if (missed[i] === 0) return '#10b981';             // không bỏ lỡ
+        if (total === 0) return '#64748b';
+        if (missed[i] === 0) return '#10b981';
         return (taken[i] / total) >= 0.75 ? '#f59e0b' : '#ef4444';
     });
-    return { labels, missed, taken, colors, rate };
+    return { labels, missed, taken, recovered, colors, rate };
 }
 function initChart() {
     const ctx = document.getElementById('adherenceChart').getContext('2d');
@@ -1186,7 +1220,13 @@ function initChart() {
                     bodyFont: { size: 13 },
                     callbacks: {
                         label: c => ` ${c.dataset.label}: ${c.raw} liều`,
-                        footer: items => ` Tổng: ${items.reduce((s, i) => s + i.raw, 0)} liều`
+                       footer: items => {
+    const total = items.reduce((s, i) => s + i.raw, 0);
+    const rec = stats.recovered[items[0].dataIndex] || 0;
+    const lines = [` Tổng: ${total} liều`];
+    if (rec) lines.push(` Trong đó lấy bù ≤15 phút: ${rec}`);
+    return lines;
+} 
                     }
                 }
             },
