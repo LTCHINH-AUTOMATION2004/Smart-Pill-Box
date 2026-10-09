@@ -433,6 +433,13 @@ input[type="text"], input[type="tel"], input[type="number"], select { font-size:
                 <button id="retryBtn" class="btn-retry" onclick="connectMQTT()">Thử lại</button>
             </div>
         </div>
+     <div class="input-form-box">
+    <label>Mã thiết bị (xem trên Serial Monitor):</label>
+    <div class="input-row-top" style="grid-template-columns: 1fr 90px; margin-top:6px;">
+        <input type="text" id="deviceIdInput" placeholder="Dán mã thiết bị vào đây">
+        <button class="btn-add-block" onclick="saveDeviceId()">Lưu</button>
+    </div>
+</div>   
         <div class="input-form-box">
     <div class="flex-inputs">
         <div class="input-row-top">
@@ -616,12 +623,17 @@ let DEVICE_ID = localStorage.getItem('device_id') || "";
 const T = s => `smartpill/${DEVICE_ID}/${s}`;
 function ensureDeviceId() {
     if (DEVICE_ID) return true;
-    const v = (prompt("Nhập MÃ THIẾT BỊ (xem trên Serial Monitor của ESP32):") || "")
-        .trim().replace(/[^A-Za-z0-9_-]/g, "");
-    if (v.length < 8) { showToast("Mã thiết bị phải từ 8 ký tự!", "error"); return false; }
+    showToast("Vào tab Lịch, nhập mã thiết bị rồi bấm Lưu!", "warn");
+    return false;
+}
+function saveDeviceId() {
+    const v = document.getElementById('deviceIdInput').value.trim().replace(/[^A-Za-z0-9_-]/g, "");
+    if (v.length < 8) return showToast("Mã thiết bị phải từ 8 ký tự!", "error");
     DEVICE_ID = v;
     localStorage.setItem('device_id', v);
-    return true;
+    try { if (client && client.isConnected()) client.disconnect(); } catch (e) {}
+    connectMQTT();
+    showToast("Đã đổi mã thiết bị", "success");
 }
 function switchTab(name, btn) {
     document.querySelectorAll('.dashboard-layout .container').forEach(c => c.classList.remove('tab-active'));
@@ -1243,6 +1255,7 @@ function initChart() {
         }
     });
 }
+document.getElementById('deviceIdInput').value = DEVICE_ID;
     connectMQTT(); renderList(); renderFingerUsers(); updateUserDropdowns(); initChart(); renderMedicalLogs(); loadCallSettings();
 </script>
 </body>
